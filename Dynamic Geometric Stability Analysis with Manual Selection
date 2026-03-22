@@ -124,3 +124,83 @@ legend("topright", legend = colnames(data_clean)[final_order[1:top_n]],
 
 # Volatile drivers
 volatile_order <- order(comp_variance, decreasing = TRUE)
+
+# =================================================================
+# G-TRACE Add-on: Dynamic Transition & Singularity Detection
+# Methodology: Critical Slowing Down (CSD) Analysis in CLR-Space
+# =================================================================
+
+# --- 1. Configuration for Sliding Window ---
+window_size <- 5  # Adjusted based on the total number of samples
+if(nrow(clr_data) <= window_size) stop("Sample size too small for window analysis.")
+
+n_windows <- nrow(clr_data) - window_size + 1
+csd_metrics <- data.frame(
+  Window_Mid = (window_size:nrow(clr_data)) - floor(window_size/2),
+  Variance = rep(NA, n_windows),
+  Autocorrelation = rep(NA, n_windows)
+)
+
+# --- 2. Calculate CSD Indicators (Variance & AR1) ---
+# High variance + High autocorrelation = System approaching a Tipping Point.
+for(i in 1:n_windows) {
+  # Extract local window in CLR-space
+  window_data <- clr_data[i:(i + window_size - 1), ]
+  
+  # Metric A: Multi-component Variance (Trace of Covariance Matrix)
+  # Represents the "flickering" of the system
+  csd_metrics$Variance[i] <- sum(apply(window_data, 2, var))
+  
+  # Metric B: Vector Autocorrelation (AR1)
+  # Represents the loss of recovery power (Slowing Down)
+  window_centered <- sweep(window_data, 2, colMeans(window_data), "-")
+  t1 <- window_centered[-nrow(window_centered), ]
+  t2 <- window_centered[-1, ]
+  csd_metrics$Autocorrelation[i] <- sum(t1 * t2) / (sqrt(sum(t1^2)) * sqrt(sum(t2^2)))
+}
+
+# --- 3. Singularity Scoring (Combined Index) ---
+# Normalize and combine metrics to identify the "Moment of Transition"
+scale_01 <- function(x) (x - min(x, na.rm=T)) / (max(x, na.rm=T) - min(x, na.rm=T))
+csd_metrics$Transition_Risk <- scale_01(csd_metrics$Variance) * scale_01(csd_metrics$Autocorrelation)
+
+# --- 4. Professional Visualization of Singularity ---
+par(mfrow = c(3, 1), mar = c(3, 5, 2, 2), oma = c(2, 0, 2, 0))
+
+# Plot A: System flickering (Variance)
+plot(csd_metrics$Window_Mid, csd_metrics$Variance, type = "b", pch = 19, col = "#8E44AD",
+     main = "System Flickering (Local Variance)", ylab = "Variance", xaxt = "n")
+grid()
+
+# Plot B: Recovery power (Autocorrelation)
+plot(csd_metrics$Window_Mid, csd_metrics$Autocorrelation, type = "b", pch = 19, col = "#D35400",
+     main = "Critical Slowing Down (AR1)", ylab = "Autocorr", xaxt = "n")
+abline(h = 0.8, lty = 2, col = "red") # High-risk threshold
+grid()
+
+# Plot C: Integrated Transition Risk
+plot(csd_metrics$Window_Mid, csd_metrics$Transition_Risk, type = "h", lwd = 5, col = "#C0392B",
+     main = "Mathematical Singularity Score (Transition Risk)", ylab = "Risk Index", xlab = "Sample Sequence")
+axis(1, at = 1:nrow(clr_data))
+grid()
+
+# --- 5. Automated Singularity Detection (Continued) ---
+# Identify the peak risk window where the system transition occurs
+singularity_idx <- csd_metrics$Window_Mid[which.max(csd_metrics$Transition_Risk)]
+max_risk_val <- max(csd_metrics$Transition_Risk, na.rm = TRUE)
+
+cat("\n", rep("-", 60), "\n", sep="")
+cat(" TRANSITION & SINGULARITY ANALYSIS SUMMARY\n")
+cat(rep("-", 60), "\n", sep="")
+cat(sprintf("Primary Transition Point  : Sample Index [%d]\n", singularity_idx))
+cat(sprintf("Maximum Risk Index (0-1)  : %.4f\n", max_risk_val))
+
+# Decision Logic based on Critical Slowing Down (CSD) theory
+if(max_risk_val > 0.8) {
+  cat("Conclusion: CRITICAL TRANSITION DETECTED. High probability of a structural shift.\n")
+} else if(max_risk_val > 0.5) {
+  cat("Conclusion: MODERATE INSTABILITY. The system is showing signs of flickering.\n")
+} else {
+  cat("Conclusion: STABLE DYNAMICS. No significant mathematical singularity found.\n")
+}
+cat(rep("=", 60), "\n\n")
