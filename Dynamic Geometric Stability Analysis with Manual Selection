@@ -1,6 +1,7 @@
 # =================================================================
 # G-TRACE Professional: Integrated Geometric Stability Analysis
 # Framework: Ohta et al. (2011) | Full Features & Professional Report
+# This is merely a visualization of "geometric discrepancies" and does not explain causal relationships or biological significance.
 # =================================================================
 
 # --- 1. User Configuration ---
@@ -125,82 +126,99 @@ legend("topright", legend = colnames(data_clean)[final_order[1:top_n]],
 # Volatile drivers
 volatile_order <- order(comp_variance, decreasing = TRUE)
 
+# --- 7. Volatile Components (System Drivers) ---
+cat("\n[VOLATILE SYSTEM DRIVERS (Highest Variance)]\n")
+volatile_n <- min(3, ncol(data_clean))
+for(i in 1:volatile_n) {
+  idx <- volatile_order[i]
+  cat(sprintf("Driver %d: %-20s (Var: %.6f)\n", 
+              i, colnames(data_clean)[idx], comp_variance[idx]))
+}
+
+cat("\n", rep("=", 60), "\n", sep="")
+cat(" END OF G-TRACE PROFESSIONAL REPORT\n")
+cat(rep("=", 60), "\n", sep="")
+
+
 # =================================================================
-# G-TRACE Add-on: Dynamic Transition & Singularity Detection
-# Methodology: Critical Slowing Down (CSD) Analysis in CLR-Space
+# G-TRACE Trial: Mathematically Robust Geometric Stability
+# Framework: PCA-Projected Aitchison Geometry & Total Variation
+# The following information is for reference purposes only.
 # =================================================================
 
-# --- 1. Configuration for Sliding Window ---
-window_size <- 5  # Adjusted based on the total number of samples
-if(nrow(clr_data) <= window_size) stop("Sample size too small for window analysis.")
 
-n_windows <- nrow(clr_data) - window_size + 1
-csd_metrics <- data.frame(
-  Window_Mid = (window_size:nrow(clr_data)) - floor(window_size/2),
-  Variance = rep(NA, n_windows),
-  Autocorrelation = rep(NA, n_windows)
+# --- 1. Robust Pre-processing ---
+ds_input <- as.matrix(Dataset)
+# Numerical stability: Zero-imputation or strict filtering
+data_clean <- ds_input[, apply(ds_input, 2, function(x) all(x > 0))]
+log_data <- log(data_clean)
+clr_data <- sweep(log_data, 1, rowMeans(log_data), "-")
+
+# --- 2. Dimensionality Reduction (Handling Rank Deficiency) ---
+# CLR data always has a rank of at most P-1. 
+# We project to the first K components to focus on structural signal.
+pca_full <- prcomp(clr_data, center = TRUE, scale. = FALSE)
+# Criterion: Use components explaining 90% of variance, or max 5 for stability
+k_components <- min(which(cumsum(pca_full$sdev^2) / sum(pca_full$sdev^2) > 0.90), 5)
+projected_data <- pca_full$x[, 1:k_components]
+
+# --- 3. Multivariate Early Warning Signals (EWS) ---
+# window_size must provide enough degrees of freedom for the reduced space
+P_eff <- ncol(projected_data)
+window_size <- max(12, P_eff * 2) 
+
+n_windows <- nrow(projected_data) - window_size + 1
+ews_metrics <- data.frame(
+  Mid_Point = (window_size:nrow(projected_data)) - floor(window_size/2),
+  Total_Variation = rep(NA, n_windows),
+  Recovery_Rate = rep(NA, n_windows)
 )
 
-# --- 2. Calculate CSD Indicators (Variance & AR1) ---
-# High variance + High autocorrelation = System approaching a Tipping Point.
 for(i in 1:n_windows) {
-  # Extract local window in CLR-space
-  window_data <- clr_data[i:(i + window_size - 1), ]
+  win_idx <- i:(i + window_size - 1)
+  W <- projected_data[win_idx, ]
   
-  # Metric A: Multi-component Variance (Trace of Covariance Matrix)
-  # Represents the "flickering" of the system
-  csd_metrics$Variance[i] <- sum(apply(window_data, 2, var))
+  # Metric A: Total Variation (Trace of Covariance)
+  # Mathematically stable alternative to Determinant. Represents system "flickering".
+  ews_metrics$Total_Variation[i] <- sum(apply(W, 2, var))
   
-  # Metric B: Vector Autocorrelation (AR1)
-  # Represents the loss of recovery power (Slowing Down)
-  window_centered <- sweep(window_data, 2, colMeans(window_data), "-")
-  t1 <- window_centered[-nrow(window_centered), ]
-  t2 <- window_centered[-1, ]
-  csd_metrics$Autocorrelation[i] <- sum(t1 * t2) / (sqrt(sum(t1^2)) * sqrt(sum(t2^2)))
+  # Metric B: Multivariate Autocorrelation (VAR-1 Approximation)
+  # Measures "Critical Slowing Down" (CSD).
+  X_t <- W[-nrow(W), , drop=FALSE]
+  X_next <- W[-1, , drop=FALSE]
+  
+  # Solve X_{t+1} = B * X_t via OLS
+  # Pillai-like trace used as a proxy for systemic resilience loss
+  fit <- lm(X_next ~ X_t)
+  ews_metrics$Recovery_Rate[i] <- sum(diag(cov(fit$fitted.values))) / sum(diag(cov(X_next)))
 }
 
-# --- 3. Singularity Scoring (Combined Index) ---
-# Normalize and combine metrics to identify the "Moment of Transition"
-scale_01 <- function(x) (x - min(x, na.rm=T)) / (max(x, na.rm=T) - min(x, na.rm=T))
-csd_metrics$Transition_Risk <- scale_01(csd_metrics$Variance) * scale_01(csd_metrics$Autocorrelation)
+# --- 4. Integrated Singularity Index (ISI) ---
+# Normalizing metrics to 0-1 scale for risk fusion
+norm_v <- (ews_metrics$Total_Variation - min(ews_metrics$Total_Variation)) / diff(range(ews_metrics$Total_Variation))
+norm_r <- (ews_metrics$Recovery_Rate - min(ews_metrics$Recovery_Rate)) / diff(range(ews_metrics$Recovery_Rate))
+ews_metrics$ISI_Score <- norm_v * norm_r
 
-# --- 4. Professional Visualization of Singularity ---
-par(mfrow = c(3, 1), mar = c(3, 5, 2, 2), oma = c(2, 0, 2, 0))
+# --- 5. Analytical Summary ---
+cat("\n", rep("=", 60), "\n", sep="")
+cat(" G-TRACE ULTRA: MATHEMATICAL INTEGRITY REPORT\n")
+cat(rep("=", 60), "\n")
+cat(sprintf("Input Components  : %d\n", ncol(clr_data)))
+cat(sprintf("Effective Rank    : %d (PCA Projection)\n", P_eff))
+cat(sprintf("Analysis Window   : %d samples\n", window_size))
+cat(sprintf("Singularity Risk  : %.4f (Max ISI)\n", max(ews_metrics$ISI_Score)))
 
-# Plot A: System flickering (Variance)
-plot(csd_metrics$Window_Mid, csd_metrics$Variance, type = "b", pch = 19, col = "#8E44AD",
-     main = "System Flickering (Local Variance)", ylab = "Variance", xaxt = "n")
-grid()
+# Peak Risk Identification
+peak_sample <- ews_metrics$Mid_Point[which.max(ews_metrics$ISI_Score)]
+cat(sprintf("Critical Point    : Sample [%d]\n", peak_sample))
+cat(rep("=", 60), "\n")
 
-# Plot B: Recovery power (Autocorrelation)
-plot(csd_metrics$Window_Mid, csd_metrics$Autocorrelation, type = "b", pch = 19, col = "#D35400",
-     main = "Critical Slowing Down (AR1)", ylab = "Autocorr", xaxt = "n")
-abline(h = 0.8, lty = 2, col = "red") # High-risk threshold
-grid()
-
-# Plot C: Integrated Transition Risk
-plot(csd_metrics$Window_Mid, csd_metrics$Transition_Risk, type = "h", lwd = 5, col = "#C0392B",
-     main = "Mathematical Singularity Score (Transition Risk)", ylab = "Risk Index", xlab = "Sample Sequence")
-axis(1, at = 1:nrow(clr_data))
-grid()
-
-# --- 5. Automated Singularity Detection (Continued) ---
-# Identify the peak risk window where the system transition occurs
-singularity_idx <- csd_metrics$Window_Mid[which.max(csd_metrics$Transition_Risk)]
-max_risk_val <- max(csd_metrics$Transition_Risk, na.rm = TRUE)
-
-cat("\n", rep("-", 60), "\n", sep="")
-cat(" TRANSITION & SINGULARITY ANALYSIS SUMMARY\n")
-cat(rep("-", 60), "\n", sep="")
-cat(sprintf("Primary Transition Point  : Sample Index [%d]\n", singularity_idx))
-cat(sprintf("Maximum Risk Index (0-1)  : %.4f\n", max_risk_val))
-
-# Decision Logic based on Critical Slowing Down (CSD) theory
-if(max_risk_val > 0.8) {
-  cat("Conclusion: CRITICAL TRANSITION DETECTED. High probability of a structural shift.\n")
-} else if(max_risk_val > 0.5) {
-  cat("Conclusion: MODERATE INSTABILITY. The system is showing signs of flickering.\n")
-} else {
-  cat("Conclusion: STABLE DYNAMICS. No significant mathematical singularity found.\n")
-}
-cat(rep("=", 60), "\n\n")
+# --- 6. Visualization ---
+par(mfrow=c(2,1), mar=c(4,4,2,2))
+# Plot 1: System Flickering (Total Variation)
+plot(ews_metrics$Mid_Point, ews_metrics$Total_Variation, type="l", col="blue", lwd=2,
+     main="Systemic Variance (Total Variation)", ylab="Variance Sum", xlab="Sequence")
+# Plot 2: Integrated Singularity Index
+plot(ews_metrics$Mid_Point, ews_metrics$ISI_Score, type="h", col="red", lwd=3,
+     main="Integrated Singularity Index (ISI)", ylab="Risk Score", xlab="Sequence")
+abline(v=peak_sample, col="darkred", lty=2)
