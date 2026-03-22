@@ -1,32 +1,35 @@
 # =================================================================
-# G-TRACE Professional: Dynamic Geometric Stability Analysis
-# Enhanced Framework with Manual Baseline Selection
+# G-TRACE Professional: Integrated Geometric Stability Analysis
+# Framework: Ohta et al. (2011) | Full Features & Professional Report
 # =================================================================
 
 # --- 1. User Configuration ---
-# Choose your reference sample index (e.g., control group, time-zero, or median sample)
+# Rows: Samples, Columns: Components.
+# Choose your reference sample index (e.g., control group, time-zero)
 target_baseline_idx <- 1 
 
+# Minimum value threshold for components to be included in analysis
+# Higher values increase numerical stability but may exclude rare components
+compositional_threshold <- 0.00001
+
 # --- 2. Data Processing & CLR Transformation ---
-# Rows: Samples, Columns: Components.
 ds_input <- as.matrix(Dataset)
-valid_mask <- apply(ds_input, 2, function(x) all(x >= 0.00001))
+
+# Filtering: Maintain strict threshold for numerical stability
+valid_mask <- apply(ds_input, 2, function(x) all(x >= compositional_threshold))
 if(sum(valid_mask) < 2) stop("Critical Error: Insufficient components for ratio analysis.")
 
 data_clean <- ds_input[, valid_mask]
 log_data <- log(data_clean)
 clr_data <- sweep(log_data, 1, rowMeans(log_data), "-")
 
-# --- 3. Baseline Validation Logic ---
-# Validation: Is the chosen baseline an outlier?
-# We use Aitchison Distance to ensure the baseline is representative.
-total_variance <- apply(clr_data, 2, var)
+# --- 3. Baseline Validation & Reliability Logic ---
+# Evaluate if the selected baseline is representative using Aitchison distance
 lrmsd_all <- rowMeans(sweep(clr_data, 2, colMeans(clr_data), "-")^2)
 baseline_reliability <- exp(-lrmsd_all[target_baseline_idx])
 
-if(baseline_reliability < 0.5) {
-  warning("Warning: Selected baseline has low representativeness (Outlier potential).")
-}
+# Identify the most representative sample (closest to the geometric mean)
+ideal_baseline_idx <- which.min(lrmsd_all)
 
 # --- 4. Trajectory Analysis (Relative to Selected Baseline) ---
 # Delta-CLR: Measuring geometric shift from the specific anchor
@@ -36,59 +39,88 @@ g_trace <- sweep(clr_data, 2, clr_data[target_baseline_idx, ], "-")
 lrmsd <- rowMeans(g_trace^2)
 gsi_scores <- exp(-lrmsd)
 
-# Anomaly Detection (Robust MAD-based)
+# Anomaly Detection (Robust MAD-based on LRMSD)
 limit_val <- median(lrmsd) + 3 * mad(lrmsd)
 anomalies <- which(lrmsd > limit_val)
 
-# --- 5. Professional Analytical Report ---
+# --- 5. Professional Analytical Report (English - Full Version) ---
 cat("\n", rep("=", 60), "\n", sep="")
 cat(" G-TRACE: GEOMETRIC STABILITY ANALYSIS REPORT\n")
 cat(rep("=", 60), "\n", sep="")
-cat(sprintf("Selected Baseline  : Sample [%d]\n", target_baseline_idx))
-cat(sprintf("Baseline Reliability: %.4f (Higher is better)\n", baseline_reliability))
-cat(sprintf("System Integrity   : %.4f (Mean GSI)\n", mean(gsi_scores)))
-cat(sprintf("Detected Anomalies : %d samples\n", length(anomalies)))
+cat(sprintf("Selected Baseline    : Sample [%d]\n", target_baseline_idx))
+cat(sprintf("Baseline Reliability : %.4f (Higher is better)\n", baseline_reliability))
+cat(sprintf("System Integrity     : %.4f (Mean GSI)\n", mean(gsi_scores)))
+cat(sprintf("Analyzed Components  : %d\n", ncol(data_clean)))
+cat(sprintf("Detection Threshold  : %g\n", compositional_threshold))
+cat(sprintf("Detected Anomalies   : %d samples\n", length(anomalies)))
 
-# --- 6. Stability Gap Analysis ---
+# Reliability Warnings & Pro-Tips
+if(baseline_reliability < 0.5) {
+  cat("!! WARNING: Selected baseline has low representativeness (Outlier potential).\n")
+}
+if(target_baseline_idx != ideal_baseline_idx) {
+  cat(sprintf("Pro-Tip: Sample [%d] is geometrically more central/representative.\n", ideal_baseline_idx))
+}
+
+# Component Stability Ranking
 comp_variance <- apply(clr_data, 2, var)
 final_order <- order(comp_variance)
-stability_confidence <- mean(comp_variance) / min(comp_variance)
 
+cat("\n[COMPONENT STABILITY RANKING (Invariance)]\n")
+cat(sprintf("%-4s | %-25s | %-12s\n", "Rank", "Component", "CLR-Variance"))
+cat(paste(rep("-", 45), collapse = ""), "\n")
+for(i in 1:length(final_order)) {
+  idx <- final_order[i]
+  cat(sprintf("%-4d | %-25s | %-12.6f\n", 
+              i, colnames(data_clean)[idx], comp_variance[idx]))
+}
+
+# Sample Stability Trajectory
+cat("\n[SAMPLE STABILITY TRAJECTORY]\n")
+cat(sprintf("%-8s | %-10s | %-10s\n", "Sample", "GSI Score", "Status"))
+cat(paste(rep("-", 32), collapse = ""), "\n")
+for(s in 1:nrow(clr_data)) {
+  status <- if(s %in% anomalies) "!!! SHIFT !!!" else "Stable"
+  # Mark baseline sample in the list
+  if(s == target_baseline_idx) status <- "BASELINE"
+  cat(sprintf("%-8d | %-10.4f | %-10s\n", s, gsi_scores[s], status))
+}
+
+# Stability Confidence Index Interpretation
+stability_confidence <- mean(comp_variance) / min(comp_variance)
 cat(sprintf("\n[STABILITY CONFIDENCE INDEX: %.4f]\n", stability_confidence))
 if(stability_confidence > 5.0) {
   cat("Result: HIGH CONFIDENCE. Strong invariant anchor identified.\n")
+} else if(stability_confidence < 2.0) {
+  cat("Result: LOW CONFIDENCE. System-wide fluctuation (No Anchor).\n")
 } else {
-  cat("Result: LOW CONFIDENCE. System lacks a stable reference component.\n")
-}
-# Interpretation Logic:
-# If stability_confidence > 5.0  -> High Confidence: Strong Invariant Reference exists.
-# If stability_confidence < 2.0  -> Low Confidence: System-wide fluctuation (No Anchor).
-
-# Identify the most representative sample index (closest to the geometric mean)
-ideal_baseline_idx <- which.min(lrmsd_all)
-if(target_baseline_idx != ideal_baseline_idx) {
-  cat(sprintf("Pro-Tip: Sample [%d] is geometrically more central.\n", ideal_baseline_idx))
+  cat("Result: MODERATE CONFIDENCE. System structure is relatively stable.\n")
 }
 
-# --- 7. Visualization ---
-par(mfrow = c(2,1), mar = c(4,4,3,2), bg = "#FDFDFD")
+# --- 6. Professional Visualization ---
+layout(matrix(c(1, 2), 2, 1))
+par(mar = c(4, 4, 3, 2), mgp = c(2, 0.7, 0), bg = "#FDFDFD")
 
-# Plot A: GSI Trajectory
-plot(gsi_scores, type = "b", pch = 21, bg = "#34495E", col = "#2C3E50", 
+# Plot A: System Stability Trajectory (GSI)
+plot(gsi_scores, type = "b", pch = 21, bg = "#34495E", col = "#2C3E50", lwd = 1.5,
      main = "Geometric Stability Index (GSI) vs Baseline", 
-     ylab = "Stability Score", xlab = "Sample Sequence", ylim = c(0, 1))
-points(target_baseline_idx, gsi_scores[target_baseline_idx], col = "blue", cex = 2, lwd = 2) # Mark Baseline
+     ylab = "Stability Score (0-1)", xlab = "Sample Sequence", ylim = c(0, 1))
+# Mark the Baseline in Blue
+points(target_baseline_idx, gsi_scores[target_baseline_idx], col = "blue", cex = 2, lwd = 2) 
+# Mark Anomalies in Red
 if(length(anomalies) > 0) points(anomalies, gsi_scores[anomalies], col = "#E74C3C", cex = 1.5, lwd = 2)
 grid()
 
-# Plot B: Deviation from Baseline
+# Plot B: Dynamics of Top Invariant Components
 top_n <- min(3, ncol(data_clean))
-matplot(g_trace[, final_order[1:top_n]], type = "l", lty = 1, lwd = 2,
+viz_cols <- c("#27AE60", "#2980B9", "#8E44AD")
+matplot(g_trace[, final_order[1:top_n]], type = "o", lty = 1, pch = 16, col = viz_cols,
         main = "Top Invariant Components (Relative Deviation)",
         ylab = "Log-Ratio Shift", xlab = "Sample Sequence")
-abline(h = 0, lty = 2, col = "red")
+abline(h = 0, lwd = 2, col = "#34495E", lty = 2)
+grid()
 legend("topright", legend = colnames(data_clean)[final_order[1:top_n]], 
-       col = 1:top_n, lty = 1, bty = "n", cex = 0.8)
+       col = viz_cols, pch = 16, bty = "n", cex = 0.8)
 
-# Identify the top components with the highest variance (instability drivers)
+# Volatile drivers
 volatile_order <- order(comp_variance, decreasing = TRUE)
